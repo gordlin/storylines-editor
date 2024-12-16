@@ -529,7 +529,10 @@ import {
     SlideshowPanel,
     SourceCounts,
     TextPanel,
-    VideoPanel
+    VideoPanel,
+    PanelType,
+    BaseStartingConfig,
+    SupportedLanguages
 } from '@/definitions';
 
 import Message from 'vue-m-message';
@@ -653,7 +656,59 @@ export default class SlideTocV extends Vue {
      * @param index Index of the slide to copy.
      */
     copySlide(index: number): void {
-        this.slides.splice(index + 1, 0, cloneDeep(this.slides[index]));
+        let copiedSlide = cloneDeep(this.slides[index]);
+        const getNumberOfMaps = (): number => {
+            let n = 0;
+            this.configFileStructure.rampConfig.forEach((f) => {
+                n += 1;
+            });
+            return n;
+        };
+
+        // Handle map panels (need to create new config file)
+        // @ts-ignore
+        copiedSlide = Object.fromEntries(
+            Object.entries(copiedSlide).map(([lang, slide]: [string, Slide]) => {
+                let slideWithNewMaps: Slide = JSON.parse(JSON.stringify(slide));
+                slideWithNewMaps.panel = slide.panel.map((panel: BasePanel) => {
+                    if (panel.type === PanelType.Map) {
+                        // create new map config, and copy old one's contents over
+                        let newPanel: MapPanel = JSON.parse(JSON.stringify(panel));
+
+                        let currentJson = '';
+                        this.configFileStructure.zip
+                            .file(
+                                `${this.configFileStructure.uuid}/ramp-config/${
+                                    this.configFileStructure.uuid
+                                }-map-${getNumberOfMaps()}.json`
+                            )
+                            ?.async('string')
+                            .then((res: string) => {
+                                currentJson = JSON.parse(res);
+
+                                newPanel.config = `${this.configFileStructure.uuid}/ramp-config/${
+                                    this.configFileStructure.uuid
+                                }-map-${getNumberOfMaps() + 1}.json`;
+
+                                const strippedFileName = newPanel.config.split('/')[2].split('.')[0];
+
+                                this.configFileStructure.rampConfig.file(
+                                    `${strippedFileName}.json`,
+                                    JSON.stringify(currentJson, null, 4)
+                                );
+
+                                Promise.resolve(newPanel);
+                            })
+                    } else {
+                        return panel;
+                    }
+                });
+
+                return [lang, slideWithNewMaps];
+            })
+        );
+
+        this.slides.splice(index + 1, 0, copiedSlide);
         this.$emit('slides-updated', this.slides);
         this.selectSlide(index + 1, this.lang);
         Message.success(this.$t('editor.slide.copy.success'));
