@@ -560,7 +560,8 @@
 
 <script lang="ts">
 import ActionModal from '@/components/helpers/action-modal.vue';
-import { Options, Prop, Vue } from 'vue-property-decorator';
+import { Save, useStateStore } from '@/stores/stateStore';
+import { Options, Prop, Vue, Watch } from 'vue-property-decorator';
 import { RouteLocationNormalized } from 'vue-router';
 import { AxiosResponse } from 'axios';
 import { throttle } from 'throttle-debounce';
@@ -657,6 +658,7 @@ export default class MetadataEditorV extends Vue {
     showDropdown = false;
     highlightedIndex = -1;
     lockStore = useLockStore();
+    stateStore = useStateStore();
 
     storylineHistory: History[] = [];
     selectedHistory: History | null = null;
@@ -664,7 +666,20 @@ export default class MetadataEditorV extends Vue {
 
     // Saving properties.
     saving = false;
-    unsavedChanges = false;
+    unsavedChanges = this.stateStore.isChanged;
+
+    @Watch('stateStore.isChanged')
+    onChanged() {
+        this.unsavedChanges = this.stateStore.isChanged;
+    }
+
+    @Watch('stateStore.reconcileToggler')
+    onReconciliationRequest() {
+        const newConfigs = this.stateStore.addChangesToNewSave(this.stateStore.getCurrentChangeLocation());
+
+        this.configs.en = newConfigs.en;
+        this.configs.fr = newConfigs.fr;
+    }
 
     controller = new AbortController();
 
@@ -739,6 +754,11 @@ export default class MetadataEditorV extends Vue {
     sourceCounts: SourceCounts = {};
     sessionExpired: boolean = false;
     totalTime = import.meta.env.VITE_APP_CURR_ENV ? Number(import.meta.env.VITE_SESSION_END) : 30;
+
+    // Debounce timer used for updateSaveStatus only.
+    // Save status is also modified in several other places (e.g. metadata modal edit, slide move/add/delete, etc.)
+    // which is not affected by this timer.
+    debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     mounted(): void {
         this.currLang = (this.$route.params.lang as string) || 'en';
@@ -1787,14 +1807,21 @@ export default class MetadataEditorV extends Vue {
         }
 
         try {
+            const stateSave = { en: {}, fr: {} };
+
             const enFile = this.configFileStructure?.zip.file(`${this.uuid}_en.json`);
             const frFile = this.configFileStructure?.zip.file(`${this.uuid}_fr.json`);
             await enFile?.async('string').then((res: string) => {
-                this.configs['en'] = JSON.parse(res);
+                const config = JSON.parse(res);
+                this.configs['en'] = config;
+                stateSave.en = JSON.parse(JSON.stringify(config));
             });
             await frFile?.async('string').then((res: string) => {
-                this.configs['fr'] = JSON.parse(res);
+                const config = JSON.parse(res);
+                this.configs['fr'] = config;
+                stateSave.fr = JSON.parse(JSON.stringify(this.configs['fr']));
             });
+            this.stateStore.save(stateSave as Save);
         } catch {
             Message.error(this.$t('editor.editMetadata.message.error.malformedProduct', this.uuid ?? ''));
             this.loadStatus = 'waiting';
@@ -1813,10 +1840,11 @@ export default class MetadataEditorV extends Vue {
         if (this.configs[this.configLang]) {
             this.useConfig(this.configs[this.configLang] as StoryRampConfig);
             this.findSources(this.configs); // increments source counts for all panels
+
             // Update router path
             if (this.reloadExisting) {
                 this.loadEditor = true;
-                this.unsavedChanges = false;
+                this.stateStore.isChanged = false;
                 this.updateEditorPath();
             } else if (!this.loadExisting) {
                 this.loadEditor = true;
@@ -1939,7 +1967,9 @@ export default class MetadataEditorV extends Vue {
 
         // Upload the ZIP file.
         if (publish) {
-            this.unsavedChanges = false;
+            // TODO: Should we make stateStore save on every generateConfig activation, or just on pubish = true??
+            this.stateStore.save({ en: this.configs.en, fr: this.configs.fr });
+
             this.configFileStructure?.zip.generateAsync({ type: 'blob' }).then((content: Blob) => {
                 const formData = new FormData();
                 formData.append('data', content, `${this.uuid}.zip`);
@@ -2066,12 +2096,18 @@ export default class MetadataEditorV extends Vue {
                 this.extendSession(true);
                 this.lockStore.broadcast?.postMessage({ action: 'saved' });
             }
+
+            // This may be necessary to allow for changes to be properly detected after saving.
+            // Without it, even attempted changes (e.g. keypress in an input field) are no longer detected, and the potential change handlers
+            // aren't even run.
+            // There's likely a better solution, please add if you find it.
+            this.loadConfig();
         }, 500);
     }
 
     updateMetadata<K extends keyof MetadataContent>(key: K, value: MetadataContent[K]): void {
         this.metadata[key] = value;
-        this.unsavedChanges = true;
+        this.stateStore.handlePotentialChange({ en: this.configs.en, fr: this.configs.fr });
     }
 
     discardMetadataUpdates(): void {
@@ -2134,6 +2170,8 @@ export default class MetadataEditorV extends Vue {
 
             const userStore = useUserStore();
             userStore.fetchUserProfile();
+
+            this.stateStore.handlePotentialChange({ en: this.configs.en, fr: this.configs.fr });
         }
         this.$vfm.close('metadata-edit-modal');
     }
@@ -2392,9 +2430,17 @@ export default class MetadataEditorV extends Vue {
 
     /**
      * Update the unsaved changes value to the payload.
+     * Debounced to prevent being called too often.
      */
-    updateSaveStatus(payload: boolean): void {
-        this.unsavedChanges = this.saving ? false : payload;
+    updateSaveStatus(payload: boolean, origin?: string): void {
+        if (this.debounceTimer) clearTimeout(this.debounceTimer);
+
+        this.debounceTimer = setTimeout(() => {
+            this.stateStore.handlePotentialChange(
+                { en: JSON.parse(JSON.stringify(this.configs.en)), fr: JSON.parse(JSON.stringify(this.configs.fr)) },
+                origin
+            );
+        }, 300);
     }
 
     refreshConfig(): void {
