@@ -583,13 +583,15 @@ export default class SlideTocV extends Vue {
 
     removeSlide(index: number): void {
         if (index === this.slideIndex) {
-            this.$emit('slide-change', -1);
+            this.selectSlide(-1, this.lang);
+            // this.$emit('slide-change', -1);
         }
 
         // Before removing the slide, updated the sources for the panels.
         this.removeSourceCounts(index);
 
         this.slides.splice(index, 1);
+        this.selectSlide(this.slides.length - 1, this.lang);
         this.$emit('slides-updated', this.slides);
     }
 

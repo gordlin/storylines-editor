@@ -560,10 +560,11 @@
 
 <script lang="ts">
 import ActionModal from '@/components/helpers/action-modal.vue';
-import { Options, Prop, Vue } from 'vue-property-decorator';
+import { Save, useStateStore } from '@/stores/stateStore';
+import { Options, Prop, Vue, Watch } from 'vue-property-decorator';
 import { RouteLocationNormalized } from 'vue-router';
 import { AxiosResponse } from 'axios';
-import { throttle } from 'throttle-debounce';
+import { debounce, throttle } from 'throttle-debounce';
 import {
     AudioPanel,
     BasePanel,
@@ -657,6 +658,7 @@ export default class MetadataEditorV extends Vue {
     showDropdown = false;
     highlightedIndex = -1;
     lockStore = useLockStore();
+    stateStore = useStateStore();
 
     storylineHistory: History[] = [];
     selectedHistory: History | null = null;
@@ -664,7 +666,20 @@ export default class MetadataEditorV extends Vue {
 
     // Saving properties.
     saving = false;
-    unsavedChanges = false;
+    unsavedChanges = this.stateStore.isChanged;
+
+    @Watch('stateStore.isChanged')
+    onChanged() {
+        this.unsavedChanges = this.stateStore.isChanged;
+    }
+
+    @Watch('stateStore.reconcileToggler')
+    onReconciliationRequest() {
+        const newConfigs = this.stateStore.addChangesToNewSave(this.stateStore.getCurrentChangeLocation());
+
+        this.configs.en = newConfigs.en;
+        this.configs.fr = newConfigs.fr;
+    }
 
     controller = new AbortController();
 
@@ -1787,14 +1802,25 @@ export default class MetadataEditorV extends Vue {
         }
 
         try {
+            const stateSave = { en: {}, fr: {} };
+
             const enFile = this.configFileStructure?.zip.file(`${this.uuid}_en.json`);
             const frFile = this.configFileStructure?.zip.file(`${this.uuid}_fr.json`);
             await enFile?.async('string').then((res: string) => {
-                this.configs['en'] = JSON.parse(res);
+                const config = JSON.parse(res);
+                this.configs['en'] = config;
+                stateSave.en = JSON.parse(JSON.stringify(config));
             });
             await frFile?.async('string').then((res: string) => {
-                this.configs['fr'] = JSON.parse(res);
+                const config = JSON.parse(res);
+                this.configs['fr'] = config;
+                stateSave.fr = JSON.parse(JSON.stringify(this.configs['fr']));
+                console.log('FR STATESAVE', JSON.parse(JSON.stringify(stateSave.fr)));
             });
+
+            // console.log('FR CONFIG', this.configs.fr);
+
+            this.stateStore.save(stateSave as Save);
         } catch {
             Message.error(this.$t('editor.editMetadata.message.error.malformedProduct', this.uuid ?? ''));
             this.loadStatus = 'waiting';
@@ -1816,13 +1842,15 @@ export default class MetadataEditorV extends Vue {
             // Update router path
             if (this.reloadExisting) {
                 this.loadEditor = true;
-                this.unsavedChanges = false;
+                // this.unsavedChanges = false;
+                this.stateStore.isChanged = false;
                 this.updateEditorPath();
             } else if (!this.loadExisting) {
                 this.loadEditor = true;
                 this.updateEditorPath();
             }
         }
+        // console.log('INITIAL LOAD', this.configs);
     }
 
     useConfig(config: StoryRampConfig): void {
@@ -1939,7 +1967,8 @@ export default class MetadataEditorV extends Vue {
 
         // Upload the ZIP file.
         if (publish) {
-            this.unsavedChanges = false;
+            // this.unsavedChanges = false;
+            this.stateStore.save({ en: this.configs.en, fr: this.configs.fr });
             this.configFileStructure?.zip.generateAsync({ type: 'blob' }).then((content: Blob) => {
                 const formData = new FormData();
                 formData.append('data', content, `${this.uuid}.zip`);
@@ -2071,7 +2100,8 @@ export default class MetadataEditorV extends Vue {
 
     updateMetadata<K extends keyof MetadataContent>(key: K, value: MetadataContent[K]): void {
         this.metadata[key] = value;
-        this.unsavedChanges = true;
+        // this.unsavedChanges = true;
+        this.stateStore.handlePotentialChange({ en: this.configs.en, fr: this.configs.fr });
     }
 
     discardMetadataUpdates(): void {
@@ -2393,8 +2423,15 @@ export default class MetadataEditorV extends Vue {
     /**
      * Update the unsaved changes value to the payload.
      */
-    updateSaveStatus(payload: boolean): void {
-        this.unsavedChanges = this.saving ? false : payload;
+    updateSaveStatus(payload: boolean, origin?: string): void {
+        // const debouncedHandlePotentialChange = debounce(100, () =>
+        this.stateStore.handlePotentialChange(
+            { en: JSON.parse(JSON.stringify(this.configs.en)), fr: JSON.parse(JSON.stringify(this.configs.fr)) },
+            origin
+        );
+        // );
+        // debouncedHandlePotentialChange();
+        // this.stateStore.handlePotentialChange({ en: this.configs.en, fr: this.configs.fr }, origin);
     }
 
     refreshConfig(): void {

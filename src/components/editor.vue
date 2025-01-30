@@ -440,6 +440,7 @@
                     :currentSlide="currentSlide"
                     :slideIndex="slideIndex"
                     @slide-change="selectSlide"
+                    @slide-edit="$emit('save-status', undefined, 'ToC')"
                     @slides-updated="updateSlides"
                     @open-metadata-modal="$vfm.open('metadata-edit-modal')"
                     @shared-asset="(oppositeAssetPath: string, sharedAssetPath: string, oppositeLang: string) => {

@@ -406,7 +406,7 @@
                         // changedFromDefault should hold a boolean indicating whether the panel is actually modified 
                         // (different from initial state). Only needed for some multimedia editors; text editors
                         // write directly to currentSlide constantly, which is handled by panelModified().
-                        currentSlide.panel[panelIndex].modified = changedFromDefault || undefined;
+                        // currentSlide.panel[panelIndex].modified = changedFromDefault || undefined;
                     }
                     "
                     v-else
@@ -546,9 +546,9 @@ export default class SlideEditorV extends Vue {
     @Watch('currentSlide', { deep: true })
     onSlideChange(): void {
         this.langTranslate = this.$t(`editor.lang.${this.lang}`);
-        this.centerPanel = this.currentSlide.centerPanel ?? false;
-        this.centerSlide = this.currentSlide.centerSlide ?? false;
-        this.includeInToc = this.currentSlide.includeInToc ?? true;
+        this.centerPanel = this.currentSlide?.centerPanel ?? false;
+        this.centerSlide = this.currentSlide?.centerSlide ?? false;
+        this.includeInToc = this.currentSlide?.includeInToc ?? true;
         this.onePanelOnly = this.currentSlide?.rightOnly || this.currentSlide?.panel?.length === 1;
     }
 

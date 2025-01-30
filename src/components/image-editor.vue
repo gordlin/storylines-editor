@@ -148,8 +148,16 @@
 </template>
 
 <script lang="ts">
+import {
+    BaseStartingConfig,
+    ConfigFileStructure,
+    ImageFile,
+    ImagePanel,
+    PanelType,
+    SlideshowPanel,
+    SourceCounts
+} from '@/definitions';
 import { Options, Prop, Vue } from 'vue-property-decorator';
-import { ConfigFileStructure, ImageFile, ImagePanel, PanelType, SlideshowPanel, SourceCounts } from '@/definitions';
 import draggable from 'vuedraggable';
 import ImagePreviewV from './helpers/image-preview.vue';
 import JSZip from 'jszip';
@@ -530,7 +538,35 @@ export default class ImageEditorV extends Vue {
 
     onImagesEdited(): void {
         this.edited = true;
-        this.$emit('slide-edit', this.imagePreviews.length !== 0);
+        this.saveChanges();
+
+        // console.log('WHICH IMAGE EDITOR?', this.imagePreviews.length);
+        // if (this.imagePreviews.length === 0) {
+        //     Object.assign(this.panel, JSON.parse(JSON.stringify(BaseStartingConfig.image)));
+        // } else if (this.imagePreviews.length === 1) {
+        //     this.panel.type = PanelType.Image;
+        //     delete (this.panel as any).items;
+        //
+        //     const newPanel = { ...this.panel, ...this.imagePreviews[0] } as any;
+        //     delete newPanel.id;
+        //
+        //     Object.assign(this.panel, newPanel as ImagePanel);
+        //     // this.panel = newPanel as ImagePanel;
+        // } else {
+        //     this.panel.type = PanelType.Slideshow;
+        //
+        //     const newPanel = {
+        //         ...this.panel,
+        //         items: this.imagePreviews.map((imagePreview) => {
+        //             const returnObject = { ...imagePreview, type: PanelType.Image } as any;
+        //             delete returnObject.id;
+        //             return returnObject as ImagePanel;
+        //         })
+        //     } as SlideshowPanel;
+        //     Object.assign(this.panel, newPanel as SlideshowPanel);
+        // }
+
+        this.$emit('slide-edit', 'Image editor');
     }
 }
 </script>
