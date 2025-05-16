@@ -12,7 +12,7 @@
                     id="metaTitle"
                     :value="metadata.title"
                     @change="metadataChanged"
-                    class="metadata-input editor-input"
+                    class="standard-input"
                 />
                 <p class="metadata-subcaption">
                     {{ $t('editor.metadataForm.caption.title') }}
@@ -25,7 +25,7 @@
             <label class="metadata-label" for="toc">{{ $t('editor.tocOrientation') }}</label>
             <div v-show="editing">
                 <select
-                    class="metadata-select"
+                    class="standard-select"
                     name="tocOrientation"
                     id="toc"
                     @change="metadataChanged"
@@ -47,7 +47,7 @@
                     v-show="editing"
                     type="checkbox"
                     id="returnToTop"
-                    class="editor-input rounded-none cursor-pointer w-4 h-4"
+                    class="self-center rounded-none cursor-pointer w-4 h-4"
                     v-model="metadata.returnTop"
                     @change="metadataChanged"
                 />
@@ -79,7 +79,7 @@
                         :value="metadata.introTitle"
                         @change="metadataChanged"
                         id="introTitle"
-                        class="metadata-input editor-input"
+                        class="standard-input"
                     />
                     <p class="metadata-subcaption">
                         {{ $t('editor.metadataForm.caption.introTitle') }}
@@ -97,7 +97,7 @@
                         id="introSubtitle"
                         :value="metadata.introSubtitle"
                         @change="metadataChanged"
-                        class="metadata-input editor-input"
+                        class="standard-input"
                     />
                     <p class="metadata-subcaption">
                         {{ $t('editor.metadataForm.caption.introSubtitle') }}
@@ -117,13 +117,12 @@
                         id="metaLogo"
                         @change="$emit('image-source-changed', $event, 'logo')"
                         :value="metadata.logoName"
-                        class="metadata-input editor-input w-full lg:w-1/2"
+                        class="standard-input lg:w-1/2"
                     />
                     <!-- Upload button -->
                     <button
-                        style="padding-top: 6.5px; padding-bottom: 6.5px"
                         @click.stop="openFileSelector('logoUpload')"
-                        class="editor-button editor-forms-button mb-0.5 bg-black border border-black text-white hover:bg-gray-800 flex items-center gap-2 shadow-sm"
+                        class="standard-button black-bg-button form-button"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
                             <path
@@ -137,7 +136,7 @@
                     <button
                         v-if="metadata.logoName || metadata.logoPreview"
                         @click.stop="removeLogo"
-                        class="editor-button py-1.5 border border-black"
+                        class="standard-button gray-border-button form-button"
                     >
                         {{ $t('editor.remove') }}
                     </button>
@@ -163,7 +162,7 @@
                 type="file"
                 id="logoUpload"
                 @change="$emit('image-changed', $event, 'logo')"
-                class="editor-input w-1/4"
+                class="standard-input w-1/4"
                 style="display: none"
             />
             <!-- Logo alt text -->
@@ -176,7 +175,7 @@
                         id="logoAltText"
                         :value="metadata.logoAltText"
                         @change="metadataChanged"
-                        class="metadata-input editor-input"
+                        class="standard-input"
                     />
                     <p class="metadata-subcaption">
                         {{ $t('editor.metadataForm.caption.logoAltText') }}
@@ -249,13 +248,13 @@
                             id="metaIntroBg"
                             @change="$emit('image-source-changed', $event, 'introBg')"
                             :value="metadata.introBgName"
-                            class="metadata-input editor-input w-full lg:w-1/2"
+                            class="standard-input lg:w-1/2"
                         />
                         <!-- Upload button -->
                         <button
                             style="padding-top: 6.5px; padding-bottom: 6.5px"
                             @click.stop="openFileSelector('backgroundUpload')"
-                            class="editor-button editor-forms-button mb-0.5 bg-black border border-black text-white hover:bg-gray-800 flex items-center gap-2 shadow-sm"
+                            class="standard-button black-bg-button form-button"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
                                 <path
@@ -269,7 +268,7 @@
                         <button
                             v-if="metadata.introBgName || metadata.introBgPreview"
                             @click.stop="removeIntroBackground"
-                            class="editor-button border mb-0.5 border-black"
+                            class="standard-button gray-border-button form-button"
                         >
                             {{ $t('editor.remove') }}
                         </button>
@@ -300,7 +299,7 @@
                 type="file"
                 id="backgroundUpload"
                 @change="$emit('image-changed', $event, 'introBg')"
-                class="editor-input w-1/4"
+                class="standard-input w-1/4"
                 style="display: none"
             />
         </section>
@@ -319,7 +318,7 @@
                     id="contextLink"
                     :value="metadata.contextLink"
                     @change="metadataChanged"
-                    class="metadata-input editor-input"
+                    class="standard-input"
                 />
                 <p class="metadata-subcaption">
                     {{ $t('editor.metadataForm.caption.contextLink') }}
@@ -337,7 +336,7 @@
                     id="contextLabel"
                     :value="metadata.contextLabel"
                     @change="metadataChanged"
-                    class="metadata-input editor-input"
+                    class="standard-input"
                 />
                 <p class="metadata-subcaption">
                     {{ $t('editor.metadataForm.caption.contextLabel') }}
@@ -350,7 +349,7 @@
             <label class="metadata-label" for="dateModified">{{ $t('editor.dateModified') }}</label>
             <div v-show="editing">
                 <input
-                    class="metadata-input editor-input w-full md:w-1/3"
+                    class="standard-input w-full md:w-1/3"
                     type="date"
                     name="dateModified"
                     id="dateModified"

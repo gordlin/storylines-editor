@@ -38,17 +38,17 @@
         <!-- chart description and edit  -->
         <div class="flex flex-col-reverse lg:flex-row mt-4 items-start flex-wrap gap-2 gap-x-2 px-1 pb-1">
             <div class="flex-1 flex flex-col w-full">
-                <label class="editor-label"> {{ $t('editor.chart.label.name') }}</label>
+                <label class="standard-label"> {{ $t('editor.chart.label.name') }}</label>
                 <label class="name-label font-bold">
                     <span class="font-normal break-all">{{ chartName }}</span>
                 </label>
 
-                <label :for="'chartPreviewCaption' + index" class="editor-label mt-2">
+                <label :for="'chartPreviewCaption' + index" class="standard-label mt-2">
                     {{ $t('editor.image.label.caption') }}
                 </label>
                 <input
                     :id="'chartPreviewCaption' + index"
-                    class="editor-input w-full"
+                    class="standard-input w-full"
                     type="text"
                     v-model="chart.caption"
                     :placeholder="$t('editor.caption.placeholder')"
@@ -58,7 +58,7 @@
 
             <!-- edit button -->
             <button
-                class="editor-button chart-btn bg-gray-100 cursor-pointer hover:bg-gray-200"
+                class="standard-button gray-border-button thin-button"
                 :id="`edit-${chart.name}-btn`"
             >
                 <div class="flex items-center">

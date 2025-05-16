@@ -3,7 +3,7 @@
         <div class="flex items-center border-b p-2" :class="[isMobileSidebar ? 'justify-between' : 'justify-center']">
             <!-- Edit metadata button -->
             <!-- Opens the edit metadata modal -->
-            <button class="toc-popup-button" @click.stop="$emit('open-metadata-modal')">
+            <button style="padding: 4px 12px; font-weight: normal;" class="standard-button toc-popup-button" @click.stop="$emit('open-metadata-modal')">
                 <span class="align-middle inline-block pr-1"
                     ><svg
                         clip-rule="evenodd"
@@ -26,7 +26,7 @@
             <!-- Close ToC sidebar button -->
             <button
                 v-if="isMobileSidebar"
-                class="editor-button toc-popup-button p-3 bg-transparent"
+                class="standard-button gray-border-button"
                 @click="$emit('close-sidebar')"
             >
                 <svg

@@ -1,7 +1,7 @@
 <template>
     <div class="flex flex-col items-start relative">
         <div class="metadata-input flex flex-col p-0 w-full">
-            <div class="flex">
+            <div class="flex" D>
                 <div
                     @click="togglePicker"
                     @keypress.enter="togglePicker"

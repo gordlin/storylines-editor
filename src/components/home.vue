@@ -153,7 +153,7 @@
                             type="text"
                             name="uuid"
                             id="product-uuid"
-                            class="editor-input w-5/6 text-center"
+                            class="standard-input w-5/6 text-center"
                             v-model="productUuid"
                             @input="checkUuid"
                             placeholder="4523ae53-5d58-4a0e-8b01-54d9824871f5"

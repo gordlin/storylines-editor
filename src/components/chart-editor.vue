@@ -1,15 +1,15 @@
 <template>
-    <div class="block mt-3">
+    <div class="block mt-6">
         <!-- Menu with option to add a new chart -->
         <div class="flex items-center">
-            <span class="font-bold px-4">{{
+            <span class="font-semibold text-lg pr-4">{{
                 $t('editor.chart.label.info', {
                     num: chartConfigs.length
                 })
             }}</span>
             <!-- add chart button -->
             <button
-                class="editor-button chart-btn bg-gray-100 cursor-pointer hover:bg-gray-200"
+                class="standard-button gray-border-button thin-button"
                 id="modal-btn"
                 @click="clearEditor()"
                 :disabled="!allowMany && chartConfigs.length > 0"
@@ -306,9 +306,6 @@ export default class ChartEditorV extends Vue {
 <style lang="scss">
 .name-label {
     text-align: left !important;
-}
-.chart-btn {
-    border: none !important;
 }
 
 .highed-chart-frame-body {
