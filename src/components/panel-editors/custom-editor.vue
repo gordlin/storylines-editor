@@ -45,7 +45,7 @@
                 </ul>
             </div>
         </div>
-        <json-editor
+        <Vue3JsonEditor
             v-model="updatedConfig"
             lang="en"
             :mode="'text'"
@@ -58,99 +58,103 @@
                 }
             "
             @json-change="(json: any) => onJsonChange(json)"
-        ></json-editor>
+        ></Vue3JsonEditor>
     </div>
 </template>
 
-<script lang="ts">
-import { Options, Prop, Vue, Watch } from 'vue-property-decorator';
+<script setup lang="ts">
 import { Vue3JsonEditor } from 'vue3-json-editor';
 import { Validator } from 'jsonschema';
+import { getCurrentInstance, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
-@Options({
-    components: {
-        'json-editor': Vue3JsonEditor
+const props = defineProps<{
+    config: string;
+}>();
+
+const emit = defineEmits(['title-edit', 'slide-edit', 'config-edited']);
+defineExpose({ saveChanges });
+
+const { $nextTick, $el } = getCurrentInstance()!.proxy!;
+const { t } = useI18n();
+
+const updatedConfig = ref('');
+const edited = ref(false);
+
+const jsonError = ref('');
+const validator: Validator = new Validator();
+const validatorErrors = ref([] as any[]);
+const showErrors = ref(false);
+
+const storylinesSchema = ref({} as Record<string, any>);
+
+watch(
+    () => props.config,
+    () => {
+        updatedConfig.value = JSON.parse(JSON.stringify(props.config));
+    },
+    { deep: true, immediate: true }
+);
+
+// returns true if no validation errors, false if errors
+function validate(validateJson?: any): boolean {
+    // TODO: add any missing properties in schema as required (e.g. chart options)
+    const checkConfig = validateJson ?? updatedConfig.value;
+
+    const checkValidation = validator.validate(checkConfig, storylinesSchema.value as any);
+    validatorErrors.value = checkValidation.errors;
+    if (jsonError.value) {
+        validatorErrors.value.push(jsonError.value);
+        return false;
     }
-})
-export default class CustomEditorV extends Vue {
-    @Prop() config!: string;
+    return validatorErrors.value.length === 0;
+}
 
-    updatedConfig = '';
-    edited = false;
+function onJsonChange(json: any): void {
+    jsonError.value = '';
+    const valid = validate(json);
+    emit('title-edit', json.title);
 
-    jsonError = '';
-    validator: Validator = new Validator();
-    validatorErrors: any = [];
-    showErrors = false;
-
-    storylinesSchema: Record<string, any> = {};
-
-    @Watch('config', { immediate: true, deep: true })
-    onConfigChanged(newConfig: any) {
-        this.updatedConfig = JSON.parse(JSON.stringify(newConfig));
-        // this.validate();
-    }
-
-    mounted(): void {
-        import('ramp-storylines_demo-scenarios-pcar/dist/StorylinesSchema.json').then((StorylinesSchema) => {
-            this.storylinesSchema = {
-                ...StorylinesSchema.$defs.slide,
-                $defs: StorylinesSchema.$defs,
-                additionalProperties: StorylinesSchema.additionalProperties
-            };
-
-            this.updatedConfig = this.config;
-            this.validate();
-        });
-
-        // selects the <textarea> inside json-editor and add label attribute dynamically
-        this.$nextTick(() => {
-            const textarea = this.$el.querySelector('textarea.jsoneditor-text');
-            if (textarea) {
-                textarea.setAttribute('aria-label', this.$t('editor.slides.advanced.editor'));
-            }
-        });
-    }
-
-    // returns true if no validation errors, false if errors
-    validate(validateJson?: any): boolean {
-        // TODO: add any missing properties in schema as required (e.g. chart options)
-        const checkConfig = validateJson ?? this.updatedConfig;
-
-        const checkValidation = this.validator.validate(checkConfig, this.storylinesSchema as any);
-        this.validatorErrors = checkValidation.errors;
-        if (this.jsonError) {
-            this.validatorErrors.push(this.jsonError);
-            return false;
-        }
-        return this.validatorErrors.length === 0;
-    }
-
-    onJsonChange(json: any): void {
-        this.jsonError = '';
-        const valid = this.validate(json);
-        this.$emit('title-edit', json.title);
-
-        // if there are no validation errors update the slide config
-        if (valid) {
-            // json editor library does not contain 2-way v-model binding so need to set manually
-            this.updatedConfig = json;
-            this.edited = true;
-            this.$emit('slide-edit');
-            this.$emit('config-edited', this.updatedConfig);
-        }
-    }
-
-    saveChanges(): void {
-        this.$emit('config-edited', this.updatedConfig);
-        this.edited = false;
-
-        // If the user saves or leaves the advanced editor page with errors, give them a warning.
-        if (this.validatorErrors.length !== 0) {
-            alert(this.$t('editor.slides.advanced.error'));
-        }
+    // if there are no validation errors update the slide config
+    if (valid) {
+        // json editor library does not contain 2-way v-model binding so need to set manually
+        updatedConfig.value = json;
+        edited.value = true;
+        emit('slide-edit');
+        emit('config-edited', updatedConfig.value);
     }
 }
+
+function saveChanges(): void {
+    emit('config-edited', updatedConfig.value);
+    edited.value = false;
+
+    // If the user saves or leaves the advanced editor page with errors, give them a warning.
+    if (validatorErrors.value.length !== 0) {
+        alert(t('editor.slides.advanced.error'));
+    }
+}
+
+onMounted(() => {
+    import('ramp-storylines_demo-scenarios-pcar/dist/StorylinesSchema.json').then((StorylinesSchema) => {
+        storylinesSchema.value = {
+            ...StorylinesSchema.$defs.slide,
+            $defs: StorylinesSchema.$defs,
+            additionalProperties: StorylinesSchema.additionalProperties
+        };
+
+        updatedConfig.value = props.config;
+        validate();
+    });
+
+    // selects the <textarea> inside json-editor and add label attribute dynamically
+    $nextTick(() => {
+        const textarea = $el.querySelector('textarea.jsoneditor-text');
+        if (textarea) {
+            textarea.setAttribute('aria-label', t('editor.slides.advanced.editor'));
+        }
+    });
+});
 </script>
 
 <style lang="scss" scoped>

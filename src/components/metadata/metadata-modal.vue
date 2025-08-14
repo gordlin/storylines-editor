@@ -1,5 +1,5 @@
 <template>
-    <vue-final-modal
+    <VueFinalModal
         @click="$emit('save-changes')"
         modalId="metadata-edit-modal"
         content-class="edit-metadata-content max-h-full overflow-y-auto max-w-xl p-7 bg-white border rounded-lg"
@@ -44,7 +44,7 @@
                 </div>
             </div>
             <div class="mx-4">
-                <metadata-content
+                <MetadataContentV
                     :metadata="metadata"
                     :createNew="false"
                     @metadata-changed="(key: string, value: string) => $emit('metadata-changed', key, value)"
@@ -52,39 +52,33 @@
                     @image-source-changed="(event: Event, type: string) => $emit('image-source-changed', event, type)"
                     @logo-removed="productStore.decrementSourceCount('Logo')"
                     @background-removed="productStore.decrementSourceCount('Background')"
-                ></metadata-content>
+                ></MetadataContentV>
             </div>
         </div>
-    </vue-final-modal>
+    </VueFinalModal>
 </template>
 
-<script lang="ts">
+<script setup lang="ts">
 import MetadataContentV from './metadata-content.vue';
-import { Options, Prop, Vue } from 'vue-property-decorator';
 import { MetadataContent } from '@/definitions';
 import { VueFinalModal } from 'vue-final-modal';
 import { useProductStore } from '@/stores/productStore';
 
-@Options({
-    components: {
-        'metadata-content': MetadataContentV,
-        'vue-final-modal': VueFinalModal
-    },
-    emits: [
-        'metadata-changed',
-        'image-changed',
-        'image-source-changed',
-        'logo-removed',
-        'background-removed',
-        'lang-change',
-        'save-changes'
-    ]
-})
-export default class MetadataModalV extends Vue {
-    @Prop() metadata!: MetadataContent;
+const emit = defineEmits([
+    'metadata-changed',
+    'image-changed',
+    'image-source-changed',
+    'logo-removed',
+    'background-removed',
+    'lang-change',
+    'save-changes'
+]);
 
-    productStore = useProductStore();
-}
+const props = defineProps<{
+    metadata: MetadataContent;
+}>();
+
+const productStore = useProductStore();
 </script>
 
 <style lang="scss"></style>

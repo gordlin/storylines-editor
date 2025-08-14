@@ -61,7 +61,7 @@
             item-key="id"
         >
             <template #item="{ element, index }">
-                <ImagePreview
+                <ImagePreviewV
                     :key="`${element.id}-${index}`"
                     :imageFile="element"
                     @delete="deleteImage"
@@ -159,207 +159,211 @@
                             </div>
                         </div>
                     </div>
-                </ImagePreview>
+                </ImagePreviewV>
             </template>
         </draggable>
     </div>
 </template>
 
-<script lang="ts">
+<script setup lang="ts">
 import { applyTextAlign } from '@/utils/styleUtils';
-import { Options, Prop, Vue } from 'vue-property-decorator';
 import { ImageFile, ImagePanel, PanelType, SlideshowImagePanel } from '@/definitions';
 import draggable from 'vuedraggable';
 import ImagePreviewV from '../support/image-preview.vue';
 import { useProductStore } from '@/stores/productStore';
+import { onMounted, ref } from 'vue';
 
-@Options({
-    components: {
-        ImagePreview: ImagePreviewV,
-        draggable
+const props = withDefaults(
+    defineProps<{
+        panel: ImagePanel | SlideshowImagePanel;
+        lang: string;
+        allowMany?: boolean;
+        centerSlide?: boolean;
+        dynamicSelected?: boolean;
+    }>(),
+    {
+        allowMany: true,
+        centerSlide: false,
+        dynamicSelected: false
     }
-})
-export default class ImageEditorV extends Vue {
-    @Prop() panel!: ImagePanel | SlideshowImagePanel;
-    @Prop() lang!: string;
-    @Prop({ default: true }) allowMany!: boolean;
-    @Prop({ default: false }) centerSlide!: boolean;
-    @Prop({ default: false }) dynamicSelected!: boolean;
+);
 
-    productStore = useProductStore();
+const emit = defineEmits(['slide-edit']);
+defineExpose({ saveChanges });
 
-    dragging = false;
-    edited = false;
+const productStore = useProductStore();
 
-    imagePreviewsLoading = false;
-    imagePreviewPromises = [] as Array<Promise<ImageFile>>;
-    imagePreviews = [] as Array<ImageFile>;
-    slideshowCaption = '';
+const dragging = ref(false);
+const edited = ref(false);
 
-    get isDragging(): boolean {
-        return this.dragging;
-    }
+const imagePreviewsLoading = ref(false);
+const imagePreviewPromises = ref([] as Array<Promise<ImageFile>>);
+const imagePreviews = ref([] as Array<ImageFile>);
+const slideshowCaption = ref('');
 
-    mounted(): void {
-        applyTextAlign(this.panel, this.centerSlide, this.dynamicSelected);
+function isDragging(): boolean {
+    return dragging.value;
+}
 
-        // This basically allows us to access the image(s) using one consistent variable instead of needing to check panel type.
-        const images =
-            this.panel.type === PanelType.SlideshowImage
-                ? (this.panel.items as Array<ImagePanel>)
-                : this.panel.src
-                  ? [this.panel]
-                  : [];
+onMounted(() => {
+    applyTextAlign(props.panel, props.centerSlide, props.dynamicSelected);
 
-        if (images !== undefined && images.length) {
-            // Set images as loading until they are all loaded and resolve.
-            this.imagePreviewsLoading = true;
+    // This basically allows us to access the image(s) using one consistent variable instead of needing to check panel type.
+    const images =
+        props.panel.type === PanelType.SlideshowImage
+            ? (props.panel.items as Array<ImagePanel>)
+            : props.panel.src
+              ? [props.panel]
+              : [];
 
-            // Process each existing image.
-            images.map((image: ImagePanel) => {
-                // Check if the config file exists in the ZIP folder first.
-                const assetSrc = `${image.src.substring(image.src.indexOf('/') + 1)}`;
-                const filename = image.src.replace(/^.*[\\/]/, '');
-                const compressedAssetFile = this.productStore.configFileStructure.zip.file(assetSrc);
-                const assetType = assetSrc.split('.').at(-1);
+    if (images !== undefined && images.length) {
+        // Set images as loading until they are all loaded and resolve.
+        imagePreviewsLoading.value = true;
 
-                if (compressedAssetFile) {
-                    this.imagePreviewPromises.push(
-                        compressedAssetFile.async(assetType !== 'svg' ? 'blob' : 'text').then((assetFile) => {
-                            if (assetType === 'svg') {
-                                assetFile = new File([assetFile], filename, {
-                                    type: 'image/svg+xml'
-                                });
-                            }
-                            return {
-                                ...image,
-                                id: image.src,
-                                src: URL.createObjectURL(assetFile as Blob)
-                            } as ImageFile;
-                        })
-                    );
-                }
-            });
+        // Process each existing image.
+        images.map((image: ImagePanel) => {
+            // Check if the config file exists in the ZIP folder first.
+            const assetSrc = `${image.src.substring(image.src.indexOf('/') + 1)}`;
+            const filename = image.src.replace(/^.*[\\/]/, '');
+            const compressedAssetFile = productStore.configFileStructure.zip.file(assetSrc);
+            const assetType = assetSrc.split('.').at(-1);
 
-            // Once all images have been retrieved, display them.
-            Promise.all(this.imagePreviewPromises).then((res) => {
-                this.imagePreviews = res;
-                this.imagePreviewsLoading = false;
-            });
-            this.slideshowCaption = this.panel.caption as string;
-        }
-    }
-
-    async addUploadedFile(file: File): Promise<ImageFile> {
-        const { inSharedAsset, newAssetName, uploadSource } = await this.productStore.addUploadedFile(file);
-
-        let imageSrc = URL.createObjectURL(file);
-        return {
-            id: uploadSource,
-            altText: '',
-            caption: '',
-            src: imageSrc
-        };
-    }
-
-    onFileChange(e: Event): void {
-        // create object URL(s) to display image(s)
-        const filelist = Array.from((e.target as HTMLInputElement).files as ArrayLike<File>);
-        const filePromises = filelist.map((file: File) => this.addUploadedFile(file));
-        Promise.all(filePromises).then((files) => {
-            this.imagePreviews.push(...files);
-            this.onImagesEdited();
+            if (compressedAssetFile) {
+                imagePreviewPromises.value.push(
+                    compressedAssetFile.async(assetType !== 'svg' ? 'blob' : 'text').then((assetFile) => {
+                        if (assetType === 'svg') {
+                            assetFile = new File([assetFile], filename, {
+                                type: 'image/svg+xml'
+                            });
+                        }
+                        return {
+                            ...image,
+                            id: image.src,
+                            src: URL.createObjectURL(assetFile as Blob)
+                        } as ImageFile;
+                    })
+                );
+            }
         });
-        //reset input value
-        (e.target as HTMLInputElement).value = '';
+
+        // Once all images have been retrieved, display them.
+        Promise.all(imagePreviewPromises.value).then((res) => {
+            imagePreviews.value = res;
+            imagePreviewsLoading.value = false;
+        });
+        slideshowCaption.value = props.panel.caption as string;
     }
+});
 
-    dropImages(e: DragEvent): void {
-        if (e.dataTransfer !== null) {
-            let files = [...e.dataTransfer.files];
+async function addUploadedFile(file: File): Promise<ImageFile> {
+    const { inSharedAsset, newAssetName, uploadSource } = await productStore.addUploadedFile(file);
 
-            // If allowMany is false, take the first one.
-            if (!this.allowMany) {
-                files = [files[0]];
-            }
+    let imageSrc = URL.createObjectURL(file);
+    return {
+        id: uploadSource,
+        altText: '',
+        caption: '',
+        src: imageSrc
+    };
+}
 
-            const filePromises = files.map((file: File) => this.addUploadedFile(file));
-            Promise.all(filePromises).then((files) => {
-                this.imagePreviews.push(...files);
-                this.onImagesEdited();
-            });
+function onFileChange(e: Event): void {
+    // create object URL(s) to display image(s)
+    const filelist = Array.from((e.target as HTMLInputElement).files as ArrayLike<File>);
+    const filePromises = filelist.map((file: File) => addUploadedFile(file));
+    Promise.all(filePromises).then((files) => {
+        imagePreviews.value.push(...files);
+        onImagesEdited();
+    });
+    //reset input value
+    (e.target as HTMLInputElement).value = '';
+}
 
-            this.dragging = false;
+function dropImages(e: DragEvent): void {
+    if (e.dataTransfer !== null) {
+        let files = [...e.dataTransfer.files];
+
+        // If allowMany is false, take the first one.
+        if (!props.allowMany) {
+            files = [files[0]];
         }
-    }
 
-    deleteImage(img: ImageFile): void {
-        const idx = this.imagePreviews.findIndex((file: ImageFile) => file.id === img.id);
-        if (idx !== -1) {
-            const assetSource = this.imagePreviews[idx].id;
-            // Remove the image from the product ZIP file.
-            this.productStore.decrementSourceCount(assetSource);
-            if (!this.productStore.sourceExists(assetSource)) {
-                // Revote the object URL if the image has been fully removed.
-                URL.revokeObjectURL(this.imagePreviews[idx].src);
-            }
-            this.imagePreviews.splice(idx, 1);
+        const filePromises = files.map((file: File) => addUploadedFile(file));
+        Promise.all(filePromises).then((files) => {
+            imagePreviews.value.push(...files);
+            onImagesEdited();
+        });
+
+        dragging.value = false;
+    }
+}
+
+function deleteImage(img: ImageFile): void {
+    const idx = imagePreviews.value.findIndex((file: ImageFile) => file.id === img.id);
+    if (idx !== -1) {
+        const assetSource = imagePreviews.value[idx].id;
+        // Remove the image from the product ZIP file.
+        productStore.decrementSourceCount(assetSource);
+        if (!productStore.sourceExists(assetSource)) {
+            // Revote the object URL if the image has been fully removed.
+            URL.revokeObjectURL(imagePreviews.value[idx].src);
         }
-        this.onImagesEdited();
+        imagePreviews.value.splice(idx, 1);
     }
+    onImagesEdited();
+}
 
-    saveChanges(): void {
-        if (this.edited) {
-            // Delete the existing properties so we can rebuild the object.
-            Object.keys(this.panel).forEach((key) => {
+function saveChanges(): void {
+    if (edited.value) {
+        // Delete the existing properties so we can rebuild the object.
+        Object.keys(props.panel).forEach((key) => {
+            // @ts-ignore
+            delete props.panel[key];
+        });
+
+        // Handle case where everything is deleted.
+        if (imagePreviews.value.length === 0) {
+            props.panel.type = PanelType.Image;
+            (props.panel as ImagePanel).src = '';
+        } else if (imagePreviews.value.length === 1) {
+            // If there's only one image uploaded, convert this to an image panel.
+            props.panel.type = PanelType.Image;
+
+            // Grab the one image from the array.
+            const imageFile = imagePreviews.value[0];
+
+            // Sort of gross, but required to update the panel config as we're not allowed to directly manipulate props.
+            Object.keys(imageFile).forEach((key) => {
+                if (key === 'id') return; // we don't need this one.
+
                 // @ts-ignore
-                delete this.panel[key];
+                (props.panel as ImagePanel)[key] = imageFile[key];
             });
+            (props.panel as ImagePanel).src = imageFile.id;
+        } else {
+            // Otherwise, convert this to a slideshowImage panel.
+            props.panel.type = PanelType.SlideshowImage;
+            props.panel.caption = slideshowCaption.value ?? undefined;
 
-            // Handle case where everything is deleted.
-            if (this.imagePreviews.length === 0) {
-                this.panel.type = PanelType.Image;
-                (this.panel as ImagePanel).src = '';
-            } else if (this.imagePreviews.length === 1) {
-                // If there's only one image uploaded, convert this to an image panel.
-                this.panel.type = PanelType.Image;
-
-                // Grab the one image from the array.
-                const imageFile = this.imagePreviews[0];
-
-                // Sort of gross, but required to update the panel config as we're not allowed to directly manipulate props.
-                Object.keys(imageFile).forEach((key) => {
-                    if (key === 'id') return; // we don't need this one.
-
-                    // @ts-ignore
-                    (this.panel as ImagePanel)[key] = imageFile[key];
-                });
-                (this.panel as ImagePanel).src = imageFile.id;
-            } else {
-                // Otherwise, convert this to a slideshowImage panel.
-                this.panel.type = PanelType.SlideshowImage;
-                this.panel.caption = this.slideshowCaption ?? undefined;
-
-                // Turn each of the image configs into an image panel and add them to the slideshow.
-                (this.panel as SlideshowImagePanel).items = this.imagePreviews.map((imageFile: ImageFile) => {
-                    const { id, ...restOfImage } = imageFile; // we don't need the id
-                    const imageSrc = id;
-                    return {
-                        ...restOfImage,
-                        src: imageSrc,
-                        type: PanelType.Image
-                    } as ImagePanel;
-                });
-            }
+            // Turn each of the image configs into an image panel and add them to the slideshow.
+            (props.panel as SlideshowImagePanel).items = imagePreviews.value.map((imageFile: ImageFile) => {
+                const { id, ...restOfImage } = imageFile; // we don't need the id
+                const imageSrc = id;
+                return {
+                    ...restOfImage,
+                    src: imageSrc,
+                    type: PanelType.Image
+                } as ImagePanel;
+            });
         }
-        this.edited = false;
     }
+    edited.value = false;
+}
 
-    onImagesEdited(): void {
-        this.edited = true;
-        this.saveChanges();
-        this.$emit('slide-edit', 'Image editor');
-    }
+function onImagesEdited(): void {
+    edited.value = true;
+    saveChanges();
+    emit('slide-edit', 'Image editor');
 }
 </script>
 

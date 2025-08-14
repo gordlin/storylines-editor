@@ -1,5 +1,5 @@
 <template>
-    <vue-final-modal
+    <VueFinalModal
         :clickToClose="false"
         :escToClose="false"
         :modalId="name"
@@ -21,32 +21,31 @@
                 {{ $t('editor.cancel') }}
             </button>
         </div>
-    </vue-final-modal>
+    </VueFinalModal>
 </template>
 
-<script lang="ts">
-import { Options, Prop, Vue } from 'vue-property-decorator';
+<script setup lang="ts">
+import { getCurrentInstance } from 'vue';
 import { VueFinalModal } from 'vue-final-modal';
 
-@Options({
-    components: {
-        'vue-final-modal': VueFinalModal
-    }
-})
-export default class MetadataEditorV extends Vue {
-    @Prop() message!: string;
-    @Prop() name!: string;
-    @Prop() messageClass?: string;
+const props = defineProps<{
+    name: string;
+    message: string;
+    messageClass?: string;
+}>();
 
-    onOk(): void {
-        this.$emit('ok');
-        this.$vfm.close(this.name);
-    }
+const emit = defineEmits(['ok', 'Cancel']);
 
-    onCancel(): void {
-        this.$emit('Cancel');
-        this.$vfm.close(this.name);
-    }
+const { $vfm } = getCurrentInstance()!.proxy!;
+
+function onOk(): void {
+    emit('ok');
+    $vfm.close(props.name);
+}
+
+function onCancel(): void {
+    emit('Cancel');
+    $vfm.close(props.name);
 }
 </script>
 

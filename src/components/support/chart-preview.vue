@@ -78,8 +78,8 @@
     </li>
 </template>
 
-<script lang="ts">
-import { Prop, Vue } from 'vue-property-decorator';
+<script setup lang="ts">
+import { onMounted, ref } from 'vue';
 import { ChartConfig } from '@/definitions';
 import { useProductStore } from '@/stores/productStore';
 
@@ -92,23 +92,26 @@ dataModule(Highcharts);
 exporting(Highcharts);
 exportData(Highcharts);
 
-export default class ChartPreviewV extends Vue {
-    @Prop() chart!: ChartConfig;
-    @Prop() lang!: string;
-    @Prop() index!: number;
-    @Prop() chartVersion!: number;
+const props = defineProps<{
+    chart: ChartConfig;
+    lang: string;
+    index: number;
+    chartVersion: number;
+}>();
 
-    productStore = useProductStore();
+const emit = defineEmits(['delete', 'captionEdit', 'edit']);
 
-    loading = true;
-    chartIdx = 0;
-    chartName = '';
+const productStore = useProductStore();
 
-    mounted(): void {
-        this.chartName = this.chart.name || '';
-        this.loading = false;
-    }
-}
+const loading = ref(true);
+// Unused?
+// const chartIdx = ref(0);
+const chartName = ref('');
+
+onMounted(() => {
+    chartName.value = props.chart.name || '';
+    loading.value = false;
+});
 </script>
 
 <style lang="scss" scoped>

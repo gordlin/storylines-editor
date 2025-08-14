@@ -36,7 +36,7 @@
                 alpha-channel="hide"
                 :visible-formats="['hex']"
                 default-format="hex"
-                @color-change="(evt: any) => (this.selectedColour = evt.cssColor)"
+                @color-change="(evt: any) => (selectedColour = evt.cssColor)"
             >
                 <template #copy-button></template>
             </ColorPicker>
@@ -44,46 +44,46 @@
     </div>
 </template>
 
-<script lang="ts">
-import { Prop, Vue, Watch } from 'vue-property-decorator';
+<script setup lang="ts">
+import { ColorPicker } from 'vue-accessible-color-picker';
+import { onBeforeMount, ref, watch } from 'vue';
 
-export default class LoadingPageV extends Vue {
-    @Prop() value!: string;
-    @Prop() name!: string;
-    @Prop() disabled?: boolean;
+const props = withDefaults(
+    defineProps<{
+        value?: string;
+        name: string;
+        disabled?: boolean;
+    }>(),
+    { value: '#000000' }
+);
 
-    isOpen = false;
-    selectedColour = '';
+const emit = defineEmits(['change']);
 
-    beforeMount(): void {
-        this.selectedColour = this.value;
-    }
+const isOpen = ref(false);
+const selectedColour = ref('');
 
-    /**
-     * If component is enabled, toggle the colour picker visibility.
-     */
-    togglePicker(): void {
-        if (!this.disabled) this.isOpen = !this.isOpen;
-    }
+onBeforeMount(() => {
+    selectedColour.value = props.value;
+});
 
-    /**
-     * Watches the selectedColour property and emits a change event when it changes. The event emitted mimics an "HTMLInputEvent" so that
-     * we don't need to make any modifications to the `metadataChanged` event listener in `metadata-content.vue`.
-     * @param evt a string representing the new colour value.
-     */
-    @Watch('selectedColour')
-    colourChanged(_evt: Event): void {
-        // If the value didn't change, don't fire the event.
-        if (this.value === this.selectedColour) return;
-
-        this.$emit('change', {
-            target: {
-                name: this.name,
-                value: this.selectedColour
-            }
-        });
-    }
+/**
+ * If component is enabled, toggle the colour picker visibility.
+ */
+function togglePicker(): void {
+    if (!props.disabled) isOpen.value = !isOpen.value;
 }
+
+watch(selectedColour, () => {
+    // If the value didn't change, don't fire the event.
+    if (props.value === selectedColour.value) return;
+
+    emit('change', {
+        target: {
+            name: props.name,
+            value: selectedColour.value
+        }
+    });
+});
 </script>
 
 <style scoped lang="scss">

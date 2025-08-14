@@ -10,8 +10,8 @@
     </div>
 </template>
 
-<script lang="ts">
-import { Prop, Vue } from 'vue-property-decorator';
+<script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 
 interface MDEditor {
     insert(
@@ -26,27 +26,29 @@ interface WETComponentObject {
     html: string;
 }
 
-export default class WETDashboardItemV extends Vue {
-    @Prop() editor!: MDEditor;
-    @Prop() component!: WETComponentObject;
-    @Prop() context!: string;
+const props = defineProps<{
+    editor: MDEditor;
+    component: WETComponentObject;
+    context?: string;
+}>();
 
-    insertText() {
-        this.editor.insert((selected: string) => {
-            const content = selected || this.$t('editor.enterText');
+const { t } = useI18n();
 
-            // Scroll back up to the text editor so the user can see that the component has been added.
-            (this.editor as any).$el.parentElement.scrollIntoView({
-                block: 'start',
-                behavior: 'smooth'
-            });
+function insertText() {
+    props.editor.insert((selected: string) => {
+        const content = selected || t('editor.enterText');
 
-            return {
-                text: this.component.html.replace('$$$selected$$$', content), // replace $$$selected$$$ in the template with the selected or default text
-                selected: content
-            };
+        // Scroll back up to the text editor so the user can see that the component has been added.
+        (props.editor as any).$el.parentElement.scrollIntoView({
+            block: 'start',
+            behavior: 'smooth'
         });
-    }
+
+        return {
+            text: props.component.html.replace('$$$selected$$$', content), // replace $$$selected$$$ in the template with the selected or default text
+            selected: content
+        };
+    });
 }
 </script>
 

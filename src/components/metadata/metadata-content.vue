@@ -403,45 +403,48 @@
     </div>
 </template>
 
-<script lang="ts">
+<script setup lang="ts">
 import { MetadataContent } from '@/definitions';
-import { Options, Prop, Vue } from 'vue-property-decorator';
 import ColourPickerInput from '../support/colour-picker-input.vue';
 
-@Options({
-    components: {
-        ColourPickerInput: ColourPickerInput
-    },
-    emits: ['metadata-changed', 'image-changed', 'image-source-changed', 'background-removed', 'logo-removed']
-})
-export default class MetadataEditorV extends Vue {
-    @Prop() metadata!: MetadataContent;
-    @Prop({ default: true }) editing!: boolean;
-    @Prop({ default: true }) createNew!: boolean;
-
-    openFileSelector(where = 'logoUpload'): void {
-        document.getElementById(where)?.click();
+const props = withDefaults(
+    defineProps<{
+        metadata: MetadataContent;
+        editing?: boolean;
+        createNew?: boolean;
+    }>(),
+    {
+        editing: true,
+        createNew: true
     }
+);
 
-    metadataChanged(event: Event): void {
-        this.$emit(
-            'metadata-changed',
-            (event.target as HTMLInputElement).name,
-            (event.target as HTMLInputElement).value
-        );
-    }
+const emit = defineEmits([
+    'metadata-changed',
+    'image-changed',
+    'image-source-changed',
+    'background-removed',
+    'logo-removed'
+]);
 
-    removeLogo(): void {
-        this.metadata.logoName = '';
-        this.metadata.logoPreview = '';
-        this.$emit('logo-removed');
-    }
+function openFileSelector(where = 'logoUpload'): void {
+    document.getElementById(where)?.click();
+}
 
-    removeIntroBackground(): void {
-        this.metadata.introBgName = '';
-        this.metadata.introBgPreview = '';
-        this.$emit('background-removed');
-    }
+function metadataChanged(event: Event): void {
+    emit('metadata-changed', (event.target as HTMLInputElement).name, (event.target as HTMLInputElement).value);
+}
+
+function removeLogo(): void {
+    props.metadata.logoName = '';
+    props.metadata.logoPreview = '';
+    emit('logo-removed');
+}
+
+function removeIntroBackground(): void {
+    props.metadata.introBgName = '';
+    props.metadata.introBgPreview = '';
+    emit('background-removed');
 }
 </script>
 

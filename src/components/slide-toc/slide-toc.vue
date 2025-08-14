@@ -92,7 +92,7 @@
         <ul class="toc-slide-list">
             <!-- Slide -->
             <!-- Dragging is turned off on mobile version as you can't scroll otherwise (component would think a scroll === a drag) -->
-            <draggable
+            <Draggable
                 :disabled="isMobileSidebar"
                 :list="slides"
                 @update="$emit('slides-updated', slides)"
@@ -364,7 +364,7 @@
                             </div>
                         </div>
                         <!-- Delete slide confirmation modal -->
-                        <action-modal
+                        <ActionModal
                             :name="`delete-slide-${index}`"
                             :title="$t('editor.slides.deleteSlide.title', { num: index + 1 })"
                             :message="
@@ -383,305 +383,306 @@
                         />
                     </li>
                 </template>
-            </draggable>
+            </Draggable>
         </ul>
     </div>
 </template>
 
-<script lang="ts">
+<script setup lang="ts">
 import ActionModal from '@/components/support/action-modal.vue';
 import SlideTocButton from '@/components/slide-toc/slide-toc-button.vue';
 import { BasePanel, ChartPanel, ImagePanel, MultiLanguageSlide, Slide, TextPanel, VideoPanel } from '@/definitions';
 import cloneDeep from 'clone-deep';
-import { VueFinalModal } from 'vue-final-modal';
 
 import Message from 'vue-m-message';
-import { Options, Prop, Vue } from 'vue-property-decorator';
-import draggable from 'vuedraggable';
-import ConfirmationModalV from '../support/confirmation-modal.vue';
+import Draggable from 'vuedraggable';
 
-import SlideEditorV from '../slide-editor.vue';
 import { useProductStore } from '@/stores/productStore';
+import { useI18n } from 'vue-i18n';
+import { onBeforeUnmount, onMounted } from 'vue';
 
-@Options({
-    components: {
-        ActionModal,
-        'slide-editor': SlideEditorV,
-        'confirmation-modal': ConfirmationModalV,
-        'vue-final-modal': VueFinalModal,
-        draggable,
-        SlideTocButton
+const props = withDefaults(
+    defineProps<{
+        slides: MultiLanguageSlide[];
+        currentSlide: Slide | string;
+        slideIndex: number;
+        lang: string;
+        closeSidebar: () => void;
+        isMobileSidebar?: boolean;
+    }>(),
+    {
+        isMobileSidebar: false
     }
-})
-export default class SlideTocV extends Vue {
-    @Prop() slides!: MultiLanguageSlide[];
-    @Prop() currentSlide!: Slide | string;
-    @Prop() slideIndex!: number;
-    @Prop() lang!: string;
-    @Prop() closeSidebar!: () => void;
-    @Prop({ default: false }) isMobileSidebar!: boolean;
+);
 
-    productStore = useProductStore();
+const emit = defineEmits([
+    'slide-change',
+    'slides-updated',
+    'scroll-to-element',
+    'open-metadata-modal',
+    'close-sidebar'
+]);
 
-    defaultBlankSlide: Slide = {
-        title: '',
-        panel: [
-            {
-                type: 'text',
-                title: '',
-                content: ''
-            } as TextPanel,
-            {
-                type: 'text',
-                title: '',
-                content: ''
-            } as TextPanel
-        ],
-        includeInToc: true
+const { t } = useI18n();
+
+const productStore = useProductStore();
+const defaultBlankSlide: Slide = {
+    title: '',
+    panel: [
+        {
+            type: 'text',
+            title: '',
+            content: ''
+        } as TextPanel,
+        {
+            type: 'text',
+            title: '',
+            content: ''
+        } as TextPanel
+    ],
+    includeInToc: true
+};
+
+/**
+ * Determines if a particular config is empty.
+ * @param slide Slide object to check.
+ * @param lang Specific config in slide to check ('en' or 'fr')
+ */
+function configEmpty(index: number, lang: keyof MultiLanguageSlide): boolean {
+    const slide: MultiLanguageSlide = props.slides[index];
+    return JSON.stringify(slide[lang]) === JSON.stringify(defaultBlankSlide);
+}
+
+/**
+ * Selects a config (english or french) of a particular slide, and opens its editor.
+ * @param index Index of slide to select (usually slide number [in UI] - 1)
+ * @param lang Specific config in slide to select ('en' or 'fr')
+ */
+function selectSlide(index: number, lang: string): void {
+    emit('slide-change', index, lang);
+}
+
+/**
+ * Adds a new slide at the end of the current list.
+ */
+function addNewSlide(): void {
+    props.slides.push({
+        en: JSON.parse(JSON.stringify(defaultBlankSlide)),
+        fr: JSON.parse(JSON.stringify(defaultBlankSlide))
+    });
+    selectSlide(props.slides.length - 1, props.lang);
+    emit('slides-updated', props.slides);
+    emit('scroll-to-element', props.slides.length - 1);
+}
+
+/**
+ * Deletes one of the language configs for a single slide. That config will be undefined after, and the slide will say "(No English/French Config)" or similar.
+ * @param slides A slide, containing an English and French config.
+ * @param currLang The config to delete, either 'en' for English of 'fr' for French.
+ */
+function deleteConfig(slides: MultiLanguageSlide, currLang: 'en' | 'fr'): void {
+    slides[currLang]?.panel.forEach((panel: BasePanel) => productStore.removeSourceCounts(panel));
+    slides[currLang] = undefined;
+    emit('slides-updated', props.slides);
+}
+
+// Assumes that you've already checked that the other lang DOES have a config.
+function copyConfigFromOtherLang(index: number, currLang: keyof MultiLanguageSlide): void {
+    const oppositeLang = currLang === 'en' ? 'fr' : 'en';
+    // Called on each image/video panel in the opposite lang's config (at the provided index)
+    // The asset within this panel (assuming one exists) must be moved to the shared folder (if its not already
+    // there). However, we must check beforehand whether an asset with the same name and contents already exists
+    // in the shared folder (in which case we do nothing), and if an asset with the same name and different
+    // contents already exists in the shared folder (in which case we give the asset uploaded to the shared
+    // asset folder a unique name)
+    const oppositeToSharedFolder = async (panel: ImagePanel | VideoPanel, oppositeLang: string): Promise<void> => {
+        // Copying to the shared folder isn't currently supported for maps or charts.
+        // TODO: remove this once it is supported
+        if ((panel as BasePanel).type === 'chart' || (panel as BasePanel).type === 'map') {
+            console.warn('Shared asset functionality is not currently supported for maps or charts.');
+            return;
+        }
+
+        if (panel.src) {
+            const assetSrc = panel.src.split('/');
+            const fileName = assetSrc.at(-1);
+            const assetType = fileName?.split('.').at(-1);
+            let inSharedAssets = assetSrc[2] === 'shared';
+            let sharedFileSource = `${productStore.configFileStructure.uuid}/assets/shared/${fileName}`;
+
+            // If the asset for this panel refers to the opposite lang's asset folder, we will assume that there
+            // is no asset in the shared asset folder with the same name and contents as this asset. Otherwise
+            // it would have already been moved there upon being uploaded
+            if (!inSharedAssets) {
+                const oppositeFileSource = panel.src;
+                const oppositeRelativePath = assetSrc.slice(3).join('/');
+                let sharedAssetName = fileName;
+                let compressedFile = productStore.configFileStructure.assets[oppositeLang].file(oppositeRelativePath);
+                let i = 2;
+
+                // If an asset with the same name, but different content, is already in the shared folder, we must
+                // give the asset we are uploading a unique name. Otherwise the existing asset will be overwritten
+                while (productStore.configFileStructure.assets['shared'].file(sharedAssetName as string)) {
+                    sharedAssetName = `${compressedFile?.name.split('.').at(0)}(${i}).${compressedFile?.name
+                        .split('.')
+                        .at(-1)}`;
+                    i++;
+                }
+                sharedFileSource = `${productStore.configFileStructure.uuid}/assets/shared/${sharedAssetName}`;
+                await compressedFile?.async(assetType !== 'svg' ? 'blob' : 'text').then((assetFile) => {
+                    if (assetType === 'svg') {
+                        assetFile = new File([assetFile], fileName as string, {
+                            type: 'image/svg+xml'
+                        });
+                    }
+                    productStore.configFileStructure.assets[oppositeLang].remove(oppositeRelativePath);
+                    productStore.configFileStructure.assets['shared'].file(sharedAssetName as string, assetFile);
+                    productStore.sourceCounts[sharedFileSource] = productStore.sourceCounts[oppositeFileSource] ?? 0;
+                    productStore.sourceCounts[oppositeFileSource] = 0;
+                    productStore.updateToSharedAsset(oppositeFileSource, sharedFileSource, oppositeLang);
+                });
+            }
+            productStore.sourceCounts[sharedFileSource] += 1;
+        } else {
+            productStore.sourceCounts[panel.src] += 1;
+        }
     };
 
-    /**
-     * Determines if a particular config is empty.
-     * @param slide Slide object to check.
-     * @param lang Specific config in slide to check ('en' or 'fr')
-     */
-    configEmpty(index: number, lang: keyof MultiLanguageSlide): boolean {
-        const slide: MultiLanguageSlide = this.slides[index];
-        return JSON.stringify(slide[lang]) === JSON.stringify(this.defaultBlankSlide);
-    }
+    props.slides[index][oppositeLang]?.panel.forEach((panel) => {
+        productStore.panelHelper(panel, oppositeToSharedFolder, oppositeLang);
+    });
 
-    /**
-     * Selects a config (english or french) of a particular slide, and opens its editor.
-     * @param index Index of slide to select (usually slide number [in UI] - 1)
-     * @param lang Specific config in slide to select ('en' or 'fr')
-     */
-    selectSlide(index: number, lang: string): void {
-        this.$emit('slide-change', index, lang);
-    }
+    // TODO: find better alternative to setTimeout. This code MUST execute after the callback above executes on each
+    // panel in the opposite lang's slide. Otherwise it will copy the contents of the opposite config before its
+    // src values are updated
+    setTimeout(() => {
+        (props.slides[index][currLang] as Slide).panel.forEach((panel) => productStore.removeSourceCounts(panel));
+        props.slides[index][currLang] = JSON.parse(JSON.stringify(props.slides[index][oppositeLang]));
+        emit('slides-updated', props.slides);
+        emit('slide-change', index, currLang);
+    }, 300);
+}
 
-    /**
-     * Adds a new slide at the end of the current list.
-     */
-    addNewSlide(): void {
-        this.slides.push({
-            en: JSON.parse(JSON.stringify(this.defaultBlankSlide)),
-            fr: JSON.parse(JSON.stringify(this.defaultBlankSlide))
-        });
-        this.selectSlide(this.slides.length - 1, this.lang);
-        this.$emit('slides-updated', this.slides);
-        this.$emit('scroll-to-element', this.slides.length - 1);
-    }
+/**
+ * Creates a new blank config for a single language on a particular slide.
+ * @param index The index of the slide to be changed into a blank slide.
+ * @param currLang The language to create a blank config for.
+ */
+function createNewConfig(index: number, currLang: 'en' | 'fr'): void {
+    // Before wiping the slides, remove source counts as necessary.
+    props.slides[index][currLang]!.panel.forEach((panel: BasePanel) => {
+        // Remove source counts for each panel in the current config
+        productStore.removeSourceCounts(panel);
+    });
 
-    /**
-     * Deletes one of the language configs for a single slide. That config will be undefined after, and the slide will say "(No English/French Config)" or similar.
-     * @param slides A slide, containing an English and French config.
-     * @param currLang The config to delete, either 'en' for English of 'fr' for French.
-     */
-    deleteConfig(slides: MultiLanguageSlide, currLang: 'en' | 'fr'): void {
-        slides[currLang]?.panel.forEach((panel: BasePanel) => this.productStore.removeSourceCounts(panel));
-        slides[currLang] = undefined;
-        this.$emit('slides-updated', this.slides);
-    }
+    props.slides[index][currLang] = JSON.parse(JSON.stringify(defaultBlankSlide));
 
-    // Assumes that you've already checked that the other lang DOES have a config.
-    copyConfigFromOtherLang(index: number, currLang: keyof MultiLanguageSlide): void {
-        const oppositeLang = currLang === 'en' ? 'fr' : 'en';
-        // Called on each image/video panel in the opposite lang's config (at the provided index)
-        // The asset within this panel (assuming one exists) must be moved to the shared folder (if its not already
-        // there). However, we must check beforehand whether an asset with the same name and contents already exists
-        // in the shared folder (in which case we do nothing), and if an asset with the same name and different
-        // contents already exists in the shared folder (in which case we give the asset uploaded to the shared
-        // asset folder a unique name)
-        const oppositeToSharedFolder = async (panel: ImagePanel | VideoPanel, oppositeLang: string): Promise<void> => {
-            // Copying to the shared folder isn't currently supported for maps or charts.
-            // TODO: remove this once it is supported
-            if ((panel as BasePanel).type === 'chart' || (panel as BasePanel).type === 'map') {
-                console.warn('Shared asset functionality is not currently supported for maps or charts.');
-                return;
-            }
+    emit('slides-updated', props.slides);
+    emit('slide-change', index, currLang);
+}
 
-            if (panel.src) {
-                const assetSrc = panel.src.split('/');
-                const fileName = assetSrc.at(-1);
-                const assetType = fileName?.split('.').at(-1);
-                let inSharedAssets = assetSrc[2] === 'shared';
-                let sharedFileSource = `${this.productStore.configFileStructure.uuid}/assets/shared/${fileName}`;
+/**
+ * Copies an entire slide, creating a new identical slide at the next index.
+ * @param index Index of the slide to copy.
+ */
+function copySlide(index: number): void {
+    // First switch to the slide for which the copy button was pressed. In the case where a new slide is created
+    // and copied right away, this will save changes for it
+    selectSlide(index, props.lang);
 
-                // If the asset for this panel refers to the opposite lang's asset folder, we will assume that there
-                // is no asset in the shared asset folder with the same name and contents as this asset. Otherwise
-                // it would have already been moved there upon being uploaded
-                if (!inSharedAssets) {
-                    const oppositeFileSource = panel.src;
-                    const oppositeRelativePath = assetSrc.slice(3).join('/');
-                    let sharedAssetName = fileName;
-                    let compressedFile =
-                        this.productStore.configFileStructure.assets[oppositeLang].file(oppositeRelativePath);
-                    let i = 2;
-
-                    // If an asset with the same name, but different content, is already in the shared folder, we must
-                    // give the asset we are uploading a unique name. Otherwise the existing asset will be overwritten
-                    while (this.productStore.configFileStructure.assets['shared'].file(sharedAssetName as string)) {
-                        sharedAssetName = `${compressedFile?.name.split('.').at(0)}(${i}).${compressedFile?.name
-                            .split('.')
-                            .at(-1)}`;
-                        i++;
-                    }
-                    sharedFileSource = `${this.productStore.configFileStructure.uuid}/assets/shared/${sharedAssetName}`;
-                    await compressedFile?.async(assetType !== 'svg' ? 'blob' : 'text').then((assetFile) => {
-                        if (assetType === 'svg') {
-                            assetFile = new File([assetFile], fileName as string, {
-                                type: 'image/svg+xml'
-                            });
-                        }
-                        this.productStore.configFileStructure.assets[oppositeLang].remove(oppositeRelativePath);
-                        this.productStore.configFileStructure.assets['shared'].file(
-                            sharedAssetName as string,
-                            assetFile
-                        );
-                        this.productStore.sourceCounts[sharedFileSource] =
-                            this.productStore.sourceCounts[oppositeFileSource] ?? 0;
-                        this.productStore.sourceCounts[oppositeFileSource] = 0;
-                        this.productStore.updateToSharedAsset(oppositeFileSource, sharedFileSource, oppositeLang);
-                    });
-                }
-                this.productStore.sourceCounts[sharedFileSource] += 1;
-            } else {
-                this.productStore.sourceCounts[panel.src] += 1;
-            }
-        };
-
-        this.slides[index][oppositeLang]?.panel.forEach((panel) => {
-            this.productStore.panelHelper(panel, oppositeToSharedFolder, oppositeLang);
-        });
-
-        // TODO: find better alternative to setTimeout. This code MUST execute after the callback above executes on each
-        // panel in the opposite lang's slide. Otherwise it will copy the contents of the opposite config before its
-        // src values are updated
-        setTimeout(() => {
-            (this.slides[index][currLang] as Slide).panel.forEach((panel) =>
-                this.productStore.removeSourceCounts(panel)
-            );
-            this.slides[index][currLang] = JSON.parse(JSON.stringify(this.slides[index][oppositeLang]));
-            this.$emit('slides-updated', this.slides);
-            this.$emit('slide-change', index, currLang);
-        }, 300);
-    }
-
-    /**
-     * Creates a new blank config for a single language on a particular slide.
-     * @param index The index of the slide to be changed into a blank slide.
-     * @param currLang The language to create a blank config for.
-     */
-    createNewConfig(index: number, currLang: 'en' | 'fr'): void {
-        // Before wiping the slides, remove source counts as necessary.
-        this.slides[index][currLang]!.panel.forEach((panel: BasePanel) => {
-            // Remove source counts for each panel in the current config
-            this.productStore.removeSourceCounts(panel);
-        });
-
-        this.slides[index][currLang] = JSON.parse(JSON.stringify(this.defaultBlankSlide));
-
-        this.$emit('slides-updated', this.slides);
-        this.$emit('slide-change', index, currLang);
-    }
-
-    /**
-     * Copies an entire slide, creating a new identical slide at the next index.
-     * @param index Index of the slide to copy.
-     */
-    copySlide(index: number): void {
-        // First switch to the slide for which the copy button was pressed. In the case where a new slide is created
-        // and copied right away, this will save changes for it
-        this.selectSlide(index, this.lang);
-
-        // increment source count of each asset in this slide
-        const incrementSourceCounts = (panel: ImagePanel | VideoPanel | ChartPanel) => {
-            const source = !!panel.src
-                ? panel.src
-                : !!(panel as ChartPanel).config
-                  ? (panel as ChartPanel).config
-                  : undefined;
-            if (source) {
-                this.productStore.sourceCounts[source] += 1;
-            }
-        };
-        this.slides[index]?.en?.panel.forEach((panel) => this.productStore.panelHelper(panel, incrementSourceCounts));
-        this.slides[index]?.fr?.panel.forEach((panel) => this.productStore.panelHelper(panel, incrementSourceCounts));
-
-        // Copy must be created after changes have been saved for the copied slide (via the above call to selectSlide())
-        this.slides.splice(index + 1, 0, cloneDeep(this.slides[index]));
-        this.$emit('slides-updated', this.slides);
-        this.selectSlide(index + 1, this.lang);
-        Message.success(this.$t('editor.slide.copy.success'));
-        this.$emit('scroll-to-element', index + 1);
-    }
-
-    removeSlide(index: number): void {
-        if (index === this.slideIndex) {
-            this.selectSlide(-1, this.lang);
-            // this.$emit('slide-change', -1);
+    // increment source count of each asset in this slide
+    const incrementSourceCounts = (panel: ImagePanel | VideoPanel | ChartPanel) => {
+        const source = !!panel.src
+            ? panel.src
+            : !!(panel as ChartPanel).config
+              ? (panel as ChartPanel).config
+              : undefined;
+        if (source) {
+            productStore.sourceCounts[source] += 1;
         }
+    };
+    props.slides[index]?.en?.panel.forEach((panel) => productStore.panelHelper(panel, incrementSourceCounts));
+    props.slides[index]?.fr?.panel.forEach((panel) => productStore.panelHelper(panel, incrementSourceCounts));
 
-        // Before removing the slide, updated the sources for the panels.
-        this.removeSourceCounts(index);
+    // Copy must be created after changes have been saved for the copied slide (via the above call to selectSlide())
+    props.slides.splice(index + 1, 0, cloneDeep(props.slides[index]));
+    emit('slides-updated', props.slides);
+    selectSlide(index + 1, props.lang);
+    Message.success(t('editor.slide.copy.success'));
+    emit('scroll-to-element', index + 1);
+}
 
-        this.slides.splice(index, 1);
-        this.selectSlide(this.slides.length - 1, this.lang);
-        this.$emit('slides-updated', this.slides);
+function removeSlide(index: number): void {
+    if (index === props.slideIndex) {
+        selectSlide(-1, props.lang);
+        // this.$emit('slide-change', -1);
     }
 
-    removeSourceCounts(deletedIndex: number): void {
-        let panelEn = this.slides.find((slide: MultiLanguageSlide, idx: number) => idx === deletedIndex)?.en?.panel;
-        let panelFr = this.slides.find((slide: MultiLanguageSlide, idx: number) => idx === deletedIndex)?.fr?.panel;
+    // Before removing the slide, updated the sources for the panels.
+    removeSourceCounts(index);
 
-        panelEn?.forEach((p: BasePanel) => this.productStore.removeSourceCounts(p));
-        panelFr?.forEach((p: BasePanel) => this.productStore.removeSourceCounts(p));
-    }
+    props.slides.splice(index, 1);
+    selectSlide(props.slides.length - 1, props.lang);
+    emit('slides-updated', props.slides);
+}
 
-    moveUp(index: number): void {
-        this.moveDown(index - 1);
-        this.$emit('scroll-to-element', index - 1);
-    }
+function removeSourceCounts(deletedIndex: number): void {
+    let panelEn = props.slides.find((slide: MultiLanguageSlide, idx: number) => idx === deletedIndex)?.en?.panel;
+    let panelFr = props.slides.find((slide: MultiLanguageSlide, idx: number) => idx === deletedIndex)?.fr?.panel;
 
-    moveDown(index: number): void {
-        this.slides.splice(index + 1, 0, this.slides.splice(index, 1)[0]);
-        this.$emit('scroll-to-element', index + 1);
-        this.$emit('slides-updated', this.slides);
-    }
+    panelEn?.forEach((p: BasePanel) => productStore.removeSourceCounts(p));
+    panelFr?.forEach((p: BasePanel) => productStore.removeSourceCounts(p));
+}
 
-    getSlideId(slide: MultiLanguageSlide): string {
-        return 'slide' + this.slides.indexOf(slide);
-    }
+function moveUp(index: number): void {
+    moveDown(index - 1);
+    emit('scroll-to-element', index - 1);
+}
 
-    resizeMobile(): void {
-        let overlayElement = document.getElementById('overlay');
-        let sidebarElement = document.getElementById('sidebar-mobile');
+function moveDown(index: number): void {
+    props.slides.splice(index + 1, 0, props.slides.splice(index, 1)[0]);
+    emit('scroll-to-element', index + 1);
+    emit('slides-updated', props.slides);
+}
 
-        if (overlayElement?.style.display != 'none' && window.innerWidth >= 768) {
-            overlayElement!.style.display = 'none';
-        } else if (sidebarElement?.style.width === '20rem' && window.innerWidth < 768) {
-            overlayElement!.style.display = 'block';
-        }
-    }
-    mounted() {
-        window.addEventListener('resize', this.resizeMobile);
-    }
+function getSlideId(slide: MultiLanguageSlide): string {
+    return 'slide' + props.slides.indexOf(slide);
+}
 
-    beforeDestroy() {
-        window.removeEventListener('resize', this.resizeMobile);
+function resizeMobile(): void {
+    let overlayElement = document.getElementById('overlay');
+    let sidebarElement = document.getElementById('sidebar-mobile');
+
+    if (overlayElement?.style.display != 'none' && window.innerWidth >= 768) {
+        overlayElement!.style.display = 'none';
+    } else if (sidebarElement?.style.width === '20rem' && window.innerWidth < 768) {
+        overlayElement!.style.display = 'block';
     }
 }
 
-// More accurate page height for mobile
-// Counts the URL bar for mobile browsers (e.g. iOS Safari) so the content doesn't vertically overshoot
-// and get covered by the URL bar when it's opened
+onMounted(() => {
+    window.addEventListener('resize', resizeMobile);
 
-let vh = window.innerHeight * 0.01;
-document.documentElement.style.setProperty('--vh', `${vh}px`);
+    // More accurate page height for mobile
+    // Counts the URL bar for mobile browsers (e.g. iOS Safari) so the content doesn't vertically overshoot
+    // and get covered by the URL bar when it's opened
 
-window.addEventListener('resize', () => {
     let vh = window.innerHeight * 0.01;
     document.documentElement.style.setProperty('--vh', `${vh}px`);
+
+    window.addEventListener('resize', () => {
+        let vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+    });
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('resize', resizeMobile);
+
+    window.removeEventListener('resize', () => {
+        let vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+    });
 });
 </script>
 
