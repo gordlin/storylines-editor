@@ -47,27 +47,36 @@
  *    all the necessary variables.
  */
 
-import { StoryRampConfig, SupportedLanguages } from '@/definitions';
+import { PanelType, StoryRampConfig, SupportedLanguages } from '@/definitions';
+import { useProductStore } from '@/stores/productStore';
 import { DetailedDiff, detailedDiff, diff } from 'deep-object-diff';
 import { defineStore } from 'pinia';
+import JSZip from 'jszip';
+import { ZipHistory } from '@/utils/ZipHistory';
 
 interface StateChange {
     timestamp: number;
     origin: string | 'unknown';
-    changes: DetailedDiff | 'external';
+    changes: DetailedDiff | 'external' | 'zipOnly';
     differentFromBase: boolean; // If the change to that point is different from the latestSavedState
     affectedSlides: AffectedSlideInfo[]; // The indexes of the slides affected by this StateChange.
+    zipChanged: boolean;
+    zipChangeIdx?: number;
 }
 
 interface AffectedSlideInfo {
     index: number;
     panel?: number;
+    type?: PanelType;
     lang: SupportedLanguages;
 }
 
 export interface Save {
     en: StoryRampConfig | undefined;
     fr: StoryRampConfig | undefined;
+    assets?: Uint8Array;
+    charts?: Uint8Array;
+    rampConfig?: Uint8Array;
 }
 
 interface PartialDetailedDiff {
@@ -105,9 +114,72 @@ function purgeFalses(obj: any): any {
     );
 }
 
+// Normalize "assets", "/assets", "assets/" -> "assets/"
+const normFolder = (p: string) => {
+    const t = p.replace(/^\/+/, '');
+    return t.endsWith('/') ? t : t + '/';
+};
+
+/** Capture the exact state of a subfolder as a deterministic Uint8Array */
+export async function captureFolderState(zip: JSZip, folderPath: string): Promise<Uint8Array> {
+    const base = normFolder(folderPath);
+    const sub = new JSZip();
+
+    // Collect file list (no dirs) and sort => stable order
+    const files: string[] = [];
+    zip.folder(base)?.forEach((rel, entry) => {
+        if (!entry.dir) files.push(rel);
+    });
+    files.sort();
+
+    // Copy bytes into a new mini-zip. Fix date + use STORE for determinism.
+    await Promise.all(
+        files.map(async (rel) => {
+            const bytes = await zip.file(base + rel)!.async('uint8array');
+            sub.file(rel, bytes, { binary: true, date: new Date(0) });
+        })
+    );
+
+    return sub.generateAsync({
+        type: 'uint8array',
+        compression: 'STORE',
+        streamFiles: true
+    });
+}
+
+/** Overwrite a subfolder in `zip` with the given snapshot produced by captureFolderState */
+export async function restoreFolderState(zip: JSZip, folderPath: string, snapshot: Uint8Array): Promise<void> {
+    const base = normFolder(folderPath);
+    const snap = await JSZip.loadAsync(snapshot);
+
+    // Remove everything currently under that folder
+    const toRemove: string[] = [];
+    zip.folder(base)?.forEach((rel, entry) => {
+        if (!entry.dir) toRemove.push(base + rel);
+    });
+    toRemove.forEach((p) => zip.remove(p));
+
+    // Write snapshot files back
+    const adds: Promise<void>[] = [];
+    snap.forEach((rel, entry) => {
+        if (!entry.dir) {
+            adds.push(
+                entry.async('uint8array').then((bytes) => {
+                    zip.file(base + rel, bytes, { binary: true, date: new Date(0) });
+                })
+            );
+        }
+    });
+    await Promise.all(adds);
+}
+
 export const useStateStore = defineStore('state', {
     state: () => ({
         // ========== STATE MANAGEMENT VARIABLES ===========
+
+        productStore: useProductStore(),
+
+        zipHistoryManager: new ZipHistory(),
 
         /**
          * Indicates whether there are any unsaved changes.
@@ -183,7 +255,7 @@ export const useStateStore = defineStore('state', {
          * @param newConfigs Up-to-date configs (en and fr) with all the new changes
          * @param origin A string indicating where the change come from. Useful for determining origin of changes for undo/redo functionality
          */
-        handlePotentialChange(newConfigs: Save, origin?: string): boolean {
+        async handlePotentialChange(newConfigs: Save, origin?: string): Promise<boolean> {
             newConfigs.en!.slides = newConfigs.en!.slides.map((slide) => {
                 if (slide && Object.keys(slide)?.length) {
                     return purgeFalses(slide);
@@ -213,12 +285,15 @@ export const useStateStore = defineStore('state', {
 
             // Determine what's changed between the new diff and the last saved one
             const lastDiffComparison: PartialDetailedDiff = diff(
-                combinedPreviousDiffs !== 'external' ? combinedPreviousDiffs : {},
+                combinedPreviousDiffs !== 'external' && combinedPreviousDiffs !== 'zipOnly'
+                    ? combinedPreviousDiffs
+                    : {},
                 newDiff
             );
 
             // Determine all the slides affected by this new change
             let affectedSlides: AffectedSlideInfo[] = [];
+            let externallyAffectedSlides: AffectedSlideInfo[] = [];
             ['added', 'deleted', 'updated'].forEach((key) => {
                 if (lastDiffComparison[key as keyof PartialDetailedDiff]) {
                     ['en', 'fr'].forEach((lang) => {
@@ -231,18 +306,64 @@ export const useStateStore = defineStore('state', {
                                     // @ts-ignore
                                     Object.keys(lastDiffComparison[key][lang].slides[slideIndex].panel).forEach(
                                         (panelIndex) => {
+                                            const panelType = newConfigs[lang as SupportedLanguages]?.slides[
+                                                parseInt(slideIndex)
+                                            ]?.panel[parseInt(panelIndex)]?.type as PanelType;
+
+                                            // Sure hope I didn't miss any
+                                            if (
+                                                panelType === PanelType.Map ||
+                                                panelType === PanelType.Chart ||
+                                                panelType === PanelType.Image ||
+                                                panelType === PanelType.Dynamic ||
+                                                panelType === PanelType.Slideshow ||
+                                                panelType === PanelType.SlideshowChart ||
+                                                panelType === PanelType.SlideshowImage
+                                            ) {
+                                                externallyAffectedSlides.push({
+                                                    index: parseInt(slideIndex),
+                                                    lang: lang as SupportedLanguages,
+                                                    panel: parseInt(panelIndex),
+                                                    type: panelType
+                                                });
+                                            }
+
                                             affectedSlides.push({
                                                 index: parseInt(slideIndex),
                                                 lang: lang as SupportedLanguages,
-                                                panel: parseInt(panelIndex)
+                                                panel: parseInt(panelIndex),
+                                                type: panelType
                                             });
                                         }
                                     );
                                 } else {
+                                    const panelType = newConfigs[lang as SupportedLanguages]?.slides[
+                                        parseInt(slideIndex)
+                                    ]?.panel[0]?.type as PanelType;
+
+                                    // Sure hope I didn't miss any
+                                    if (
+                                        panelType === PanelType.Map ||
+                                        panelType === PanelType.Chart ||
+                                        panelType === PanelType.Image ||
+                                        panelType === PanelType.Dynamic ||
+                                        panelType === PanelType.Slideshow ||
+                                        panelType === PanelType.SlideshowChart ||
+                                        panelType === PanelType.SlideshowImage
+                                    ) {
+                                        externallyAffectedSlides.push({
+                                            index: parseInt(slideIndex),
+                                            lang: lang as SupportedLanguages,
+                                            panel: 0,
+                                            type: panelType
+                                        });
+                                    }
+
                                     affectedSlides.push({
                                         index: parseInt(slideIndex),
                                         lang: lang as SupportedLanguages,
-                                        panel: 0
+                                        panel: 0,
+                                        type: panelType
                                     });
                                 }
                             });
@@ -251,8 +372,99 @@ export const useStateStore = defineStore('state', {
                 }
             });
 
+            // if (externallyAffectedSlides.length) {
+            //     const currentFolderState = captureFolderState(productStore.configFileStructure.zip);
+            // }
+
+            const zipChanged = await this.zipHistoryManager.commitZipIfChanged(
+                this.productStore.configFileStructure.zip
+            );
+            if (zipChanged) {
+                // Now also check if config is changed
+
+                // If changes are the same as the ones already added to the list (at that position), don't bother re-listing them
+                // Notably prevents "redo" operations from being detected as new changes and mucking things up
+                // ZIP CHANGED, CONFIG NOT
+                if (this.isDiffEmpty(lastDiffComparison)) {
+                    this.recordNewChange({
+                        timestamp: Date.now(),
+                        origin: origin ?? 'unknown',
+                        changes: 'zipOnly',
+                        zipChanged: true,
+                        zipChangeIdx: this.zipHistoryManager.currentPosition,
+                        affectedSlides: affectedSlides,
+                        differentFromBase: false
+                    });
+                    this.isChanged = true; // Because zip changed
+                    return true;
+                }
+                // There are no changes whatsoever from the last save. Set stuff accordingly.
+                else if (this.isDiffEmpty(newDiff)) {
+                    // Currently still at the base save. No need to add an 'empty diff'!
+                    if (this.currentLoc === -1) {
+                        this.recordNewChange({
+                            timestamp: Date.now(),
+                            origin: origin ?? 'unknown',
+                            changes: 'zipOnly',
+                            zipChanged: true,
+                            zipChangeIdx: this.zipHistoryManager.currentPosition,
+                            affectedSlides: affectedSlides,
+                            differentFromBase: false
+                        });
+                        this.isChanged = true; // Because zip changed
+                        return true;
+                    }
+
+                    // Add an 'empty diff' to the list, indicating past changes have been erased.
+                    // Doing this allows the erasing to be undone too (bring back past changes).
+                    this.recordNewChange({
+                        timestamp: Date.now(),
+                        origin: origin ?? 'unknown',
+                        changes: newDiff,
+                        differentFromBase: false,
+                        affectedSlides: affectedSlides,
+                        zipChanged: true,
+                        zipChangeIdx: this.zipHistoryManager.currentPosition
+                    });
+
+                    this.isChanged = true;
+                    return true;
+                }
+                // Check if there are any additional changes beyond the last recorded change. If there isn't, exit
+                else if (!Object.keys(lastDiffComparison).length) {
+                    this.recordNewChange({
+                        timestamp: Date.now(),
+                        origin: origin ?? 'unknown',
+                        changes: 'zipOnly',
+                        zipChanged: true,
+                        zipChangeIdx: this.zipHistoryManager.currentPosition,
+                        affectedSlides: affectedSlides,
+                        differentFromBase: false
+                    });
+                    this.isChanged = true; // Because zip changed
+                    return true;
+                }
+
+                // "Fail" cases have all been checked and failed. Save the new diff to stateChangesList
+                this.recordNewChange({
+                    timestamp: Date.now(),
+                    origin: origin ?? 'unknown',
+                    // Considered saving the diff between the combinedPreviousDiffs and the newDiffs,
+                    // but I think this pointlessly increases the number of operations for detecting
+                    // new changes (we'd need to merge all preceding entries in stateChangesList every
+                    // single time) in exchange for a negligible decrease in memory usage.
+                    // If anyone disagrees, feel free to @ me.
+                    changes: newDiff,
+                    differentFromBase: true,
+                    affectedSlides: affectedSlides,
+                    zipChanged: true,
+                    zipChangeIdx: this.zipHistoryManager.currentPosition
+                });
+                this.isChanged = true;
+                return true;
+            }
             // ======================
-            // Handling the cases
+            // Handling the cases if zip not changed
 
             // If changes are the same as the ones already added to the list (at that position), don't bother re-listing them
             // Notably prevents "redo" operations from being detected as new changes and mucking things up
@@ -273,7 +485,8 @@ export const useStateStore = defineStore('state', {
                     origin: origin ?? 'unknown',
                     changes: newDiff,
                     differentFromBase: false,
-                    affectedSlides: affectedSlides
+                    affectedSlides: affectedSlides,
+                    zipChanged: false
                 });
 
                 this.isChanged = false;
@@ -295,7 +508,8 @@ export const useStateStore = defineStore('state', {
                 // If anyone disagrees, feel free to @ me.
                 changes: newDiff,
                 differentFromBase: true,
-                affectedSlides: affectedSlides
+                affectedSlides: affectedSlides,
+                zipChanged: false
             });
             this.isChanged = true;
             return true;
@@ -393,7 +607,7 @@ export const useStateStore = defineStore('state', {
          * Adds all current changes to latestSavedState and resets the stateChangesList stack and currentLoc.
          * @param savedConfigs Configs with all the changes, to be saved.
          */
-        save(savedConfigs: Save): void {
+        async save(savedConfigs: Save, folderZip?: JSZip): Promise<void> {
             // Clear out any key-value properties with empty values
 
             savedConfigs.en!.slides = savedConfigs.en!.slides.map((slide) => {
@@ -411,6 +625,9 @@ export const useStateStore = defineStore('state', {
                     return {};
                 }
             });
+
+            // Save the external folders
+            this.zipHistoryManager.snapshotFromZip(this.productStore.configFileStructure.zip);
 
             // Add cleaned configs as the latest save
             this.latestSavedState = JSON.parse(JSON.stringify(savedConfigs));

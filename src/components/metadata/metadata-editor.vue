@@ -1728,7 +1728,7 @@ export default class MetadataEditorV extends Vue {
                 //     this.configs['fr'].stylesheets.push([`${this.uuid}/styles/main.css`]);
                 // }
             });
-            this.stateStore.save(stateSave as Save);
+            await this.stateStore.save(stateSave as Save, this.productStore.configFileStructure.zip);
             this.productStore.currentSlide = '';
         } catch {
             Message.error(this.$t('editor.editMetadata.message.error.malformedProduct', this.uuid ?? ''));
